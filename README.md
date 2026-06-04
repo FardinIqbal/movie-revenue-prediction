@@ -1,149 +1,149 @@
-# Movie Revenue Prediction
+# Box Office Revenue Predictor
 
-A machine‑learning study that models theatrical box‑office revenue using rich metadata from the **TMDB 5000 Movie** corpus.
-The pipeline spans rigorous data cleansing, domain‑driven feature construction, and comparative evaluation of three regression families—linear, instance‑based, and ensemble—under repeated cross‑validation.
-All experiments are fully reproducible from the supplied notebook and script.
-
----
-
-## Data
-
-| File                         | Description                                                  | Rows   | Size    |
-| ---------------------------- | ------------------------------------------------------------ | ------ | ------- |
-| `data/tmdb_5000_movies.csv`  | Core movie attributes (budget, revenue, genres, dates, etc.) |  4 803 |  5.4 MB |
-| `data/tmdb_5000_credits.csv` | Cast and crew JSON blobs keyed by `movie_id`                 |  4 803 |  40 MB  |
-
-### Target
-
-`revenue` – worldwide theatrical gross in USD.
-
-### Core explanatory fields
-
-Budget, popularity index, runtime, release timestamp, nested JSON for genres, production companies, collections, cast, crew, languages.
-
----
-
-## Repository Layout
+End-to-end ML pipeline predicting box-office revenue from TMDB 5000 metadata. Three regression families compared under 5-fold cross-validation. Random Forest wins on MAE at $31.4M; Linear Regression wins on R-squared at 0.769.
 
 ```
-movie-revenue-prediction/
-├── data/                        # raw CSVs (TMDB export)
-├── notebooks/
-│   └── movie_revenue_prediction.ipynb   # end‑to‑end workflow
-├── scripts/
-│   └── feature_engineering_and_modeling.py
-├── report/
-│   └── movie_revenue_prediction_report.pdf
-├── requirements.txt
-└── README.md
+Dataset         TMDB 5000 Movies + Credits  (4,803 rows -> 4,504 after cleaning)
+Features        ~100 engineered numeric features
+Models          OLS, k-NN (k=5), Random Forest (200 trees, depth 25)
+Best MAE        $31.4M  (Random Forest, top-20 features)
+Best R^2        0.769   (Linear Regression)
+Validation      80/20 hold-out + 5-fold K-Fold (random_state=42)
 ```
 
 ---
 
-## Environment
+## What it is
+
+A graduate-level machine learning study modeling worldwide theatrical revenue from movie metadata. The pipeline covers outlier filtering, nested-JSON extraction, domain-driven feature construction (talent prestige, franchise effects, temporal windows, studio history), and head-to-head evaluation of linear, instance-based, and ensemble regressors on the same design matrix.
+
+Repository contents:
 
 ```
-python 3.10+
-pandas  2.2
-numpy   2.x
-scikit-learn 1.5
-matplotlib 3.9
+data/                             raw TMDB CSVs (movies + credits)
+notebooks/
+  movie_revenue_prediction.ipynb  end-to-end workflow (EDA, FE, modeling)
+scripts/
+  feature_engineering_and_modeling.py  headless reproduction of final metrics
+report/
+  movie_revenue_prediction_report.pdf  written findings
 ```
 
-Install:
+---
+
+## Dataset
+
+TMDB 5000 Movie Dataset (Kaggle mirror of TMDb public metadata).
+
+| File | Rows | Size | Contents |
+|---|---|---|---|
+| `data/tmdb_5000_movies.csv` | 4,803 | 5.4 MB | budget, revenue, genres, dates, popularity, runtime, votes, nested JSON for collections/companies/languages |
+| `data/tmdb_5000_credits.csv` | 4,803 | 40 MB | cast and crew as JSON blobs keyed by `movie_id` |
+
+**Target:** `revenue` (worldwide theatrical gross, USD).
+
+**Cleaning filters** (compound thresholds on implausible extremes):
+
+- `budget <= 175M`, `revenue <= 700M`
+- `vote_count <= 8,000`, `3.5 <= vote_average <= 8.3`
+- `60 <= runtime <= 200`, `popularity <= 150`
+
+After filtering: **4,504 observations**. Credits joined on the filtered movie set.
+
+---
+
+## Feature engineering
+
+The final design matrix contains **~100 numeric features** derived from the raw metadata:
+
+| Group | Features |
+|---|---|
+| Genres | binary indicators for genres with frequency >= 50, plus `genre_other` residual |
+| Temporal | release month, weekday, summer/holiday/spring-break flags, five-year period bins (`period_1990_1994`, ...) |
+| Studios | flags for major distributors; per-studio historical mean revenue |
+| Franchise | boolean `is_franchise` from `belongs_to_collection`; collection-level mean revenue |
+| Talent prestige | `is_famous_director`, `director_avg_revenue` (directors with >=5 high-impact releases); `famous_actor_count` (cast overlap with >=5 high-impact titles) |
+| Interactions | 12 multiplicative terms (`budget x popularity`, `franchise x budget`, etc.) |
+| Transformations | `log1p` on budget and popularity; quadratic terms on key numerics |
+
+All categorical fields are one-hot encoded. Numeric features are z-scored for k-NN; left raw for OLS and Random Forest.
+
+---
+
+## Models compared
+
+| Model | Hyperparameters | Fit objective |
+|---|---|---|
+| Ordinary Least Squares | closed-form | minimize RSS under full column rank |
+| k-Nearest Neighbors | `k=5`, Euclidean, z-scored features | local mean prediction |
+| Random Forest Regressor | 200 trees, `max_depth=25`, `max_features=sqrt(p)`, `min_samples_split=5` | bootstrap aggregation of CART |
+
+Hyperparameters selected via grid search on training folds. All models share the same cleaned dataset and design matrix.
+
+---
+
+## Evaluation
+
+- **Hold-out split:** 80% train / 20% test, `random_state=42`.
+- **Cross-validation:** 5-fold K-Fold on the full dataset (`KFold(n_splits=5, shuffle=True, random_state=42)`), `cross_val_score` per model.
+- **Metrics:** MAE, RMSE, R-squared. Random Forest also evaluated on the top-20 features by importance.
+
+### Results
+
+| Model | MAE (USD) | RMSE (USD) | R^2 | Notes |
+|---|---|---|---|---|
+| Linear Regression | 36.1M | 56.6M | **0.769** | captures strong linear signal; best R-squared |
+| k-NN (k=5) | 41.3M | 73.3M | 0.613 | degrades in high-dim feature space |
+| Random Forest (top-20 features) | **31.4M** | 58.7M | 0.752 | best MAE; robust to non-linearity |
+
+Random Forest minimizes absolute error while exposing feature importances; OLS explains the most variance but overshoots on long-tail blockbusters.
+
+---
+
+## Build and run
+
+**Requirements:** Python 3.10+, pandas 2.2, numpy 2.x, scikit-learn 1.5, matplotlib 3.9.
 
 ```bash
+git clone https://github.com/FardinIqbal/movie-revenue-prediction.git
+cd movie-revenue-prediction
+
 python -m venv .venv
 source .venv/bin/activate            # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
+pip install "pandas>=2.2" "numpy>=2.0" "scikit-learn>=1.5" "matplotlib>=3.9" jupyter
 ```
 
----
-
-## Quick Start
+Reproduce results:
 
 ```bash
-# 1. Data exploration / training
+# Option A: interactive notebook (EDA + modeling)
 jupyter lab notebooks/movie_revenue_prediction.ipynb
 
-# 2. Headless run (recreates final metrics):
+# Option B: headless script (regenerates final metrics)
 python scripts/feature_engineering_and_modeling.py
 ```
 
-The script regenerates train/test splits, fits all models, prints validation metrics, and serialises artefacts to `outputs/`.
+Determinism: all random seeds fixed at `random_state=42`. Reruns reproduce identical metrics.
 
 ---
 
-## Methodology
+## Tech stack
 
-### 1  Data Cleaning
-
-* Removed implausible entries using compound thresholds:
-  – `budget ≤ 175 M`, `revenue ≤ 700 M`,
-  – `vote_count ≤ 8 000`, `3.5 ≤ vote_average ≤ 8.3`,
-  – `60 ≤ runtime ≤ 200`, `popularity ≤ 150`.
-* Synchronised `credits` to filtered movie set; resulted in **4 504** observations.
-
-### 2  Feature Engineering
-
-* **Genres**: binary indicators for genres with frequency ≥ 50; residual category `genre_other`.
-* **Temporal**: month, weekday, summer/holiday/spring‑break flags, five‑year bins (`period_1990‑1994`, …).
-* **Studios**: flags for major distributors; per‑studio historical mean revenue.
-* **Franchise**: boolean `is_franchise` from `belongs_to_collection`; collection‑level mean revenue.
-* **Talent prestige**:
-  – `is_famous_director`, `director_avg_revenue` (≥ 5 high‑impact releases),
-  – `famous_actor_count` (cast overlap with ≥ 5 high‑impact titles).
-* **Interactions**: 12 multiplicative terms capturing effect modulation (e.g., `budget × popularity`, `franchise × budget`).
-* **Transformations**: `log1p` on budget/popularity, quadratic terms for key numerics.
-
-Final design matrix: **\~100 numeric features** after one‑hot encoding.
-
-### 3  Learning Algorithms
-
-| Model                       | Hyper‑parameters                                                    | Fit objective                       |
-| --------------------------- | ------------------------------------------------------------------- | ----------------------------------- |
-| **Ordinary Least Squares**  | closed form                                                         | minimise RSS under full column rank |
-| **k‑Nearest Neighbours**    | `k=5`, Euclidean, features z‑scored                                 | local average prediction            |
-| **Random Forest Regressor** | 200 trees, `max_depth=25`, `max_features=√p`, `min_samples_split=5` | bootstrap aggregation of CART       |
-
-Hyper‑parameters chosen via grid search on training folds (5‑fold K‑Fold, `random_state=42`).
-
-### 4  Validation Protocol
-
-* **Hold‑out split**: 80 % train / 20 % test, stratified on revenue quartiles.
-* **Cross‑validation**: 5‑fold repeated on full dataset for out‑of‑sample generalisation estimate.
-* **Metrics**: MAE, RMSE, R², Residual Standard Error (bias‑adjusted RMSE).
+Python, scikit-learn, Pandas, NumPy, matplotlib, Jupyter.
 
 ---
 
-## Results
+## Academic context
 
-| Model                           | MAE (USD)  | RMSE (USD) | R²    | Notes                             |
-| ------------------------------- | ---------- | ---------- | ----- | --------------------------------- |
-| Linear Regression               | 36.1 M     | 56.6 M     | 0.769 | strong linear signal captured     |
-| k‑NN `k=5`                      | 41.3 M     | 73.3 M     | 0.613 | suffers in high‑dim space         |
-| Random Forest (top‑20 features) | **31.4 M** | 58.7 M     | 0.752 | best MAE; robust to non‑linearity |
+Stony Brook University graduate ML coursework, April-May 2025. Team project (Fardin Iqbal, Yetro Cheng, Tanjim Ahammad) covering EDA, feature engineering, modeling, and cross-validated evaluation against a written report and live demo.
 
-*Random Forest attains the lowest absolute error while preserving interpretability through feature importance.*
-
----
-
-## Reproducibility
-
-* Deterministic random seeds in scikit‑learn (`random_state=42`).
-* Environment versions fixed in `requirements.txt`.
-* Notebook outputs cleared; reruns regenerate identical metrics.
-
----
-
-## Authors
-
-* Fardin Iqbal — model development, evaluation
-* Yetro Cheng — feature engineering, experimental design
-* Tanjim Ahammad — data cleaning, preprocessing
+Contributions:
+- **Fardin Iqbal** - model development, evaluation, cross-validation
+- **Yetro Cheng** - feature engineering, experimental design
+- **Tanjim Ahammad** - data cleaning, preprocessing
 
 ---
 
 ## License
 
-MIT License (see `LICENSE`).
+MIT License. See [`LICENSE`](LICENSE).
